@@ -1,9 +1,18 @@
-# simplyblock_driver.py — Part 1
+#    Copyright 2025 Simplyblock.io
+#
+#    Licensed under the Apache License, Version 2.0 (the "License"); you may
+#    not use this file except in compliance with the License. You may obtain
+#    a copy of the License at
+#
+#         http://www.apache.org/licenses/LICENSE-2.0
+#
+#    Unless required by applicable law or agreed to in writing, software
+#    distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+#    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+#    License for the specific language governing permissions and limitations
+#    under the License.
 #
 # OpenStack Cinder Volume Driver for Simplyblock (NVMe/TCP)
-#
-# SPDX-License-Identifier: Apache-2.0
-
 from typing import Any, Dict
 import math
 
@@ -11,23 +20,29 @@ from oslo_config import cfg
 from oslo_log import log as logging
 from oslo_utils import units
 
-from cinder import context, exception, interface
 from cinder.common import constants
+from cinder import context
+from cinder import exception
 from cinder.i18n import _
-from cinder.volume import driver, qos_specs
-from .client import SimplyblockAPIException, SimplyblockClient
+from cinder import interface
+from cinder.volume import configuration
+from cinder.volume import driver
+from cinder.volume.drivers.simplyblock.client import SimplyblockAPIException
+from cinder.volume.drivers.simplyblock.client import SimplyblockClient
+from cinder.volume import qos_specs
 
 
 LOG = logging.getLogger(__name__)
 
 simplyblock_opts = [
     cfg.StrOpt("simplyblock_endpoint", help="Simplyblock API base URL"),
-    cfg.StrOpt("simplyblock_cluster_secret", help="Simplyblock Cluster secret"),
+    cfg.StrOpt("simplyblock_cluster_secret",
+               help="Simplyblock Cluster secret"),
     cfg.StrOpt("simplyblock_cluster_uuid", help="Cluster UUID"),
     cfg.StrOpt("simplyblock_pool_name", help="Simplyblock Pool Name"),
 ]
 CONF = cfg.CONF
-CONF.register_opts(simplyblock_opts, group="simplyblock")
+CONF.register_opts(simplyblock_opts, group=configuration.SHARED_CONF_GROUP)
 
 
 class SimplyblockDriverException(exception.VolumeDriverException):
@@ -69,9 +84,10 @@ class SimplyblockDriver(driver.VolumeDriver):
 
         self.transport_type = "tcp"
         self._storage_protocol = constants.NVMEOF_TCP
-        self.configuration = kwargs.get("configuration", None) or CONF.simplyblock
-        api_token = f"{self.configuration.simplyblock_cluster_uuid} {self.configuration.simplyblock_cluster_secret}"
-        LOG.debug(f"Initialising Simplyblock volume driver")
+        self.configuration.append_config_values(simplyblock_opts)
+        api_token = (f"{self.configuration.simplyblock_cluster_uuid} "
+                     f"{self.configuration.simplyblock_cluster_secret}")
+        LOG.debug("Initialising Simplyblock volume driver")
         self.client = SimplyblockClient(
             base_url=self.configuration.simplyblock_endpoint,
             api_token=api_token,
@@ -157,7 +173,8 @@ class SimplyblockDriver(driver.VolumeDriver):
         data["free_capacity_gb"] = results["size_free"] / units.G
 
         data["current_iops"] = (
-            results["read_io_ps"] + results["write_io_ps"] + results["unmap_io_ps"]
+            results["read_io_ps"] + results["write_io_ps"]
+            + results["unmap_io_ps"]
         )
 
         data["shared_targets"] = False
@@ -210,20 +227,22 @@ class SimplyblockDriver(driver.VolumeDriver):
 
     def create_volume(self, volume):
         """Create a new volume."""
-        LOG.info("Creating volume %s of size %d GB", volume.name_id, volume.size)
+        LOG.info("Creating volume %s of size %d GB",
+                 volume.name_id, volume.size)
         payload = {
             "name": f"cinder-vol-{volume.name_id}",
             "size_gb": volume.size,
         }
         qos = self._get_qos_settings(volume.volume_type)
         if qos:
-            LOG.debug("Got QoS settings for volume %s: %s", volume.name_id, qos)
+            LOG.debug("Got QoS settings for volume %s: %s",
+                      volume.name_id, qos)
             payload.update(qos)
         lv = self.client.create_volume(**payload)
         # Save volume ID in provider_id so we can find it later
         volume.provider_id = lv.get("results")
         LOG.info(
-            f"Volume %s created successfully. Provider id: %s",
+            "Volume %s created successfully. Provider id: %s",
             volume.name_id,
             volume.provider_id,
         )
@@ -236,7 +255,8 @@ class SimplyblockDriver(driver.VolumeDriver):
             self.client.extend_volume(volume.provider_id, new_size_str)
 
     def _setup_volume(
-        self, volume, volume_type=None, raise_on_error=False, force_qos_update=False
+        self, volume, volume_type=None, raise_on_error=False,
+            force_qos_update=False
     ):
         if not volume_type:
             volume_type = volume.volume_type
@@ -265,7 +285,8 @@ class SimplyblockDriver(driver.VolumeDriver):
 
     def create_volume_from_snapshot(self, volume, snapshot):
         """Create a new volume from a snapshot."""
-        LOG.info("Creating volume %s from snapshot %s", volume.name_id, snapshot.id)
+        LOG.info("Creating volume %s from snapshot %s",
+                 volume.name_id, snapshot.id)
 
         new_size_gb = volume.size
         res = self.client.clone_volume_from_snapshot(
@@ -279,7 +300,7 @@ class SimplyblockDriver(driver.VolumeDriver):
         self._setup_volume(volume)
 
         LOG.info(
-            f"Volume %s from snapshot %s created successfully. " f"Provider id: %s",
+            "Volume %s from snapshot %s created successfully. Provider id: %s",
             volume.name_id,
             snapshot.id,
             volume.provider_id,
@@ -290,7 +311,8 @@ class SimplyblockDriver(driver.VolumeDriver):
         """Delete a volume."""
         vol_id = volume.provider_id
         if not vol_id:
-            LOG.warning("No provider_id for volume %s, skipping delete", volume.name_id)
+            LOG.warning("No provider_id for volume %s, skipping delete",
+                        volume.name_id)
             return
         LOG.info("Deleting volume %s", vol_id)
         try:
@@ -313,7 +335,8 @@ class SimplyblockDriver(driver.VolumeDriver):
         hostnqn = connector.get("nqn")
         found_dsc = connector.get("found_dsc")
         host_ips = connector.get("host_ips", [])
-        LOG.info("Current host hostNQN is %s and IP(s) are %s", hostnqn, host_ips)
+        LOG.info("Current host hostNQN is %s and IP(s) are %s",
+                 hostnqn, host_ips)
         LOG.debug(
             "initialize_connection: connector hostnqn is %s found_dsc %s",
             hostnqn,
@@ -326,10 +349,12 @@ class SimplyblockDriver(driver.VolumeDriver):
 
         response = self.client.get_volume_connection_strings(vol_id)
         portals = [
-            (p["ip"], p["port"], self.transport_type) for p in response["results"]
+            (p["ip"], p["port"], self.transport_type)
+            for p in response["results"]
         ]
 
-        # multiple portals o the same controller are not supported in os-bricks 2025.1
+        # multiple portals on the same controller
+        # are not supported in os-bricks 2025.1
         # provide only primary connection to avoid errors
         portals = portals[:1]
         target_nqn = response["results"][-1]["nqn"]
@@ -361,20 +386,23 @@ class SimplyblockDriver(driver.VolumeDriver):
     # ---------------- Snapshot Operations ----------------
     def create_snapshot(self, snapshot):
         """Create a snapshot from a volume."""
-        LOG.info("Creating snapshot %s from volume %s", snapshot.id, snapshot.volume_id)
+        LOG.info("Creating snapshot %s from volume %s",
+                 snapshot.id, snapshot.volume_id)
         res = self.client.create_snapshot(
-            volume_id=snapshot.volume.provider_id, name=f"cinder-snap-{snapshot.id}"
+            volume_id=snapshot.volume.provider_id,
+            name=f"cinder-snap-{snapshot.id}"
         )
         snapshot.provider_id = res.get("results")
         LOG.info(
-            f"Snapshot {snapshot.id} from volume {snapshot.volume_id} created successfully. "
-            f"Provider id: {snapshot.provider_id}"
+            "Snapshot %s from volume %s created successfully. Provider id: %s",
+            snapshot.id, snapshot.volume_id, snapshot.provider_id
         )
         return {"provider_id": snapshot.provider_id}
 
     def delete_snapshot(self, snapshot):
         """Delete a snapshot."""
-        LOG.info("Deleting snapshot %s. Provider id: snapshot.provider_id", snapshot.id)
+        LOG.info("Deleting snapshot %s. Provider id: snapshot.provider_id",
+                 snapshot.id)
         self.client.delete_snapshot(snapshot.provider_id)
 
     # ---------------- Housekeeping ----------------
@@ -390,18 +418,21 @@ class SimplyblockDriver(driver.VolumeDriver):
         """Build NVMe-oF connection data dictionary from Simplyblock export.
 
         Args:
-            export: Dictionary containing NVMe export details from Simplyblock API.
-                   Expected keys: target_nqn, portal_ip, portal_port
-                   Optional keys: transport_type, host_nqn
+            export:
+                Dictionary containing NVMe export details from Simplyblock API.
+                Expected keys: target_nqn, portal_ip, portal_port
+                Optional keys: transport_type, host_nqn
 
         Returns:
             Dictionary with NVMe connection parameters in Cinder format.
 
         Raises:
-            VolumeDriverException: If required fields are missing in export data.
+            VolumeDriverException:
+                If required fields are missing in export data.
         """
         required_fields = ["target_nqn", "portal_ip", "portal_port"]
-        missing_fields = [field for field in required_fields if field not in export]
+        missing_fields = [field for field in required_fields
+                          if field not in export]
 
         if missing_fields:
             raise exception.VolumeDriverException(
@@ -414,7 +445,8 @@ class SimplyblockDriver(driver.VolumeDriver):
         # Validate transport type
         if transport_type.lower() not in ("tcp", "rdma"):
             LOG.warning(
-                f"Unsupported transport type: {transport_type}. Defaulting to 'tcp'"
+                "Unsupported transport type: %s. Defaulting to 'tcp'",
+                transport_type
             )
             transport_type = "tcp"
 
@@ -434,16 +466,17 @@ class SimplyblockDriver(driver.VolumeDriver):
     def create_cloned_volume(self, volume, src_vref):
         """Create a clone of the specified volume."""
         LOG.info(
-            f"Creating clone of volume %s (provider_id %s) as a new volume %s",
+            "Creating clone of volume %s (provider_id %s) as a new volume %s",
             src_vref.name_id,
             src_vref.provider_id,
-            volume.name_id,
+            volume.name_id
         )
         try:
             # 1. Create temporary snapshot from source volume
             res = self.client.create_snapshot(
                 volume_id=src_vref.provider_id,
-                name=f"cinder-tmp-snap-vol-{src_vref.name_id}-{volume.name_id}",
+                name=f"cinder-tmp-snap-vol-"
+                     f"{src_vref.name_id}-{volume.name_id}",
             )
             snapshot_provider_id = res.get("results")
 
@@ -473,7 +506,9 @@ class SimplyblockDriver(driver.VolumeDriver):
 
     def retype(self, context, volume, new_type, diff, host):
         # force apply qos from new volume type
-        self._setup_volume(volume, new_type, raise_on_error=True, force_qos_update=True)
+        self._setup_volume(
+            volume, new_type, raise_on_error=True, force_qos_update=True
+        )
         return True, {}
 
     def _extract_backend_id(self, existing_ref):
@@ -492,7 +527,8 @@ class SimplyblockDriver(driver.VolumeDriver):
           * Lookup the backend volume
           * Rename it to cinder naming convention: cinder-vol-<volume.name_id>
           * Attach attributes so we remember the original id/name/uuid
-          * Set volume.provider_id so future operations target the correct object
+          * Set volume.provider_id so future operations target
+            the correct object
         """
         LOG.info("Managing existing volume %s", existing_ref)
         sbid = self._extract_backend_id(existing_ref)
@@ -549,7 +585,8 @@ class SimplyblockDriver(driver.VolumeDriver):
         volume.provider_id = sbid
 
         LOG.info(
-            "Successfully managed existing volume %s as cinder-vol-%s (provider_id=%s)",
+            "Successfully managed existing volume %s as cinder-vol-%s "
+            "(provider_id=%s)",
             sb_vol.get("name"),
             volume.name_id,
             sbid,
@@ -567,7 +604,8 @@ class SimplyblockDriver(driver.VolumeDriver):
         sbid = self._extract_backend_id(existing_ref)
         if not sbid:
             raise exception.ManageExistingInvalidReference(
-                _("manage_existing_get_size requires 'source-id' or equivalent")
+                _("manage_existing_get_size requires 'source-id' "
+                  "or equivalent")
             )
 
         try:
@@ -583,7 +621,7 @@ class SimplyblockDriver(driver.VolumeDriver):
         # Try a few common fields returned by different APIs
         try:
             size_gb = int(math.ceil(int(sb_vol["size"]) / units.G))
-        except:
+        except Exception:
             msg = _("Could not find Simplyblock volume %s")
             LOG.error("%s. Volume info: %s", msg, sb_vol)
             raise SimplyblockDriverException(msg)
@@ -628,7 +666,9 @@ class SimplyblockDriver(driver.VolumeDriver):
             LOG.error(
                 "Could not find Simplyblock volume %s for unmanage", vol_id
             )
-            raise SimplyblockDriverException(f"Backend volume {vol_id} not found")
+            raise SimplyblockDriverException(
+                f"Backend volume {vol_id} not found"
+            )
 
         # Safely extract attributes (may be None)
         attrs = sb_vol.get("attributes") or {}
@@ -642,16 +682,21 @@ class SimplyblockDriver(driver.VolumeDriver):
         if old_name:
             payload["name"] = old_name
 
-        # If there are remaining attributes – send them; otherwise send empty dict to clear
+        # If there are remaining attributes – send them;
+        # otherwise send empty dict to clear
         payload["attributes"] = new_attrs if new_attrs else {}
 
         try:
             self.client.update_volume(vol_id, data=payload)
         except SimplyblockAPIException as e:
-            LOG.error("Failed to update Simplyblock volume %s during unmanage: %s", vol_id, e)
-            raise exception.VolumeDriverException(message=f"Failed to unmanage backend volume: {e}")
+            LOG.error(
+                "Failed to update Simplyblock volume %s during unmanage: %s",
+                vol_id, e
+            )
+            raise exception.VolumeDriverException(
+                message=f"Failed to unmanage backend volume: {e}")
 
-        LOG.info("Successfully unmanaged Simplyblock volume %s (provider_id=%s)", volume.name_id, vol_id)
-
-
-
+        LOG.info(
+            "Successfully unmanaged Simplyblock volume %s (provider_id=%s)",
+            volume.name_id, vol_id
+        )

@@ -1,23 +1,46 @@
+#    Copyright 2025 Simplyblock.io
+#
+#    Licensed under the Apache License, Version 2.0 (the "License"); you may
+#    not use this file except in compliance with the License. You may obtain
+#    a copy of the License at
+#
+#         http://www.apache.org/licenses/LICENSE-2.0
+#
+#    Unless required by applicable law or agreed to in writing, software
+#    distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+#    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+#    License for the specific language governing permissions and limitations
+#    under the License.
+#
+"""Unit tests for OpenStack Cinder Simplyblock driver."""
 import copy
 import json
+import logging
 import unittest
 from unittest import mock
 
 from oslo_utils import units
 import requests
 
-from cinder import context, exception
+from cinder import context
+from cinder import exception
 from cinder.tests.unit import fake_constants as fake
-from cinder.tests.unit import fake_volume, test
+from cinder.tests.unit import fake_volume
+from cinder.tests.unit import test
 from cinder.volume import configuration as conf
 from cinder.volume.drivers.simplyblock.client import SimplyblockAPIException
 from cinder.volume.drivers.simplyblock.driver import SimplyblockDriver
 
 
+LOG = logging.getLogger(__name__)
+
+
 class SimplyblockDriverTestCase(test.TestCase):
     def setUp(self):
         super(SimplyblockDriverTestCase, self).setUp()
-        self.ctxt = context.RequestContext(fake.USER_ID, fake.PROJECT_ID, is_admin=True)
+        self.ctxt = context.RequestContext(
+            fake.USER_ID, fake.PROJECT_ID, is_admin=True
+        )
 
         # Mock configuration
         self.configuration = mock.Mock(spec=conf.Configuration)
@@ -29,7 +52,6 @@ class SimplyblockDriverTestCase(test.TestCase):
             "a459b320-c97a-4e0e-a90a-6bfa4f03f6c3"
         )
         self.configuration.simplyblock_pool_name = "testing1"
-        self.configuration.volume_backend_name = "simplyblock"
         self.configuration.safe_get.return_value = "simplyblock"
 
         # Initialize driver
@@ -90,7 +112,8 @@ class SimplyblockDriverTestCase(test.TestCase):
 
     def test_setup_should_fail_if_simplyblock_client_cant_connect(self):
         """Verify driver setup fails when Simplyblock API is unavailable."""
-        self.mock_failed_response(status_code=500, error_text="Connection failed")
+        self.mock_failed_response(status_code=500,
+                                  error_text="Connection failed")
 
         self.assertRaises(
             exception.VolumeDriverException, self.driver.do_setup, self.ctxt
@@ -195,8 +218,10 @@ class SimplyblockDriverTestCase(test.TestCase):
 
         # Verify request payload
         request_json = call_kwargs["json"]
-        print("request_json", request_json)
-        self.assertEqual(request_json["name"], f"cinder-vol-{self.volume.name_id}")
+        # print("request_json", request_json)
+        self.assertEqual(
+            request_json["name"], f"cinder-vol-{self.volume.name_id}"
+        )
         self.assertEqual(request_json["size"], f"{self.volume.size}G")
         # Verify QoS parameters are absent
         self.assertNotIn("max_rw_iops", request_json)
@@ -306,7 +331,9 @@ class SimplyblockDriverTestCase(test.TestCase):
         }
         self.mock_successful_response(mock_response)
 
-        conn_info = self.driver.initialize_connection(self.volume, self.connector)
+        conn_info = self.driver.initialize_connection(
+            self.volume, self.connector
+        )
 
         expected_data = {
             "target_nqn": "nqn.2024-05.simplyblock:vol-123",
@@ -383,7 +410,9 @@ class SimplyblockDriverTestCase(test.TestCase):
         new_volume.provider_id = None
         new_volume.volume_type = None
 
-        result = self.driver.create_volume_from_snapshot(new_volume, self.snapshot)
+        result = self.driver.create_volume_from_snapshot(
+            new_volume, self.snapshot
+        )
 
         # Verify API call was made
         self.requests_mock.assert_called_once()
@@ -393,8 +422,14 @@ class SimplyblockDriverTestCase(test.TestCase):
 
         # Verify request payload
         request_json = call_kwargs["json"]
-        self.assertEqual(request_json["snapshot_id"], self.snapshot.provider_id)
-        self.assertEqual(request_json["clone_name"], f"cinder-vol-{new_volume.name_id}")
+        self.assertEqual(
+            request_json["snapshot_id"],
+            self.snapshot.provider_id
+        )
+        self.assertEqual(
+            request_json["clone_name"],
+            f"cinder-vol-{new_volume.name_id}"
+        )
 
         self.assertEqual(result, {"provider_id": fake.UUID3})
 
@@ -414,7 +449,10 @@ class SimplyblockDriverTestCase(test.TestCase):
             },
         )
 
-        result = self.driver.create_volume_from_snapshot(new_volume, self.snapshot)
+        result = self.driver.create_volume_from_snapshot(
+            new_volume,
+            self.snapshot
+        )
 
         # Verify API calls were made
         self.requests_mock.assert_called()
@@ -547,7 +585,9 @@ class SimplyblockDriverTestCase(test.TestCase):
         # Mock successful QoS update
         self.mock_successful_response()
 
-        result, updates = self.driver.retype(self.ctxt, self.volume, new_type, {}, None)
+        result, updates = self.driver.retype(
+            self.ctxt, self.volume, new_type, {}, None
+        )
 
         # Verify retype was successful
         self.assertTrue(result)
@@ -556,7 +596,7 @@ class SimplyblockDriverTestCase(test.TestCase):
         # Verify QoS update was called
         call_args, call_kwargs = self.requests_mock.call_args
         request_json = call_kwargs["json"]
-        print("request_json", request_json)
+        # print("request_json", request_json)
         self.assertEqual(request_json["max_rw_iops"], 4000)
         self.assertEqual(request_json["max_r_mbytes"], 100)
 
@@ -570,8 +610,10 @@ class SimplyblockDriverTestCase(test.TestCase):
         )
 
         # Mock failed QoS update
-        with mock.patch.object(self.driver.client, "update_volume") as mock_update:
-            mock_update.side_effect = SimplyblockAPIException(message="QoS error")
+        with (mock.patch.object(self.driver.client, "update_volume")
+              as mock_update):
+            mock_update.side_effect = \
+                SimplyblockAPIException(message="QoS error")
 
             self.assertRaises(
                 SimplyblockAPIException,
@@ -624,7 +666,9 @@ class SimplyblockDriverTestCase(test.TestCase):
         export_data = {"target_nqn": "nqn.test"}
 
         self.assertRaises(
-            exception.VolumeDriverException, self.driver._build_nvme_data, export_data
+            exception.VolumeDriverException,
+            self.driver._build_nvme_data,
+            export_data
         )
 
     def test_manage_existing_success(self):
@@ -657,7 +701,8 @@ class SimplyblockDriverTestCase(test.TestCase):
             json=mock.Mock(return_value=upd_resp),
         )
 
-        # requests.Session.request is patched globally; ensure two-call sequence
+        # requests.Session.request is patched globally;
+        # ensure two-call sequence
         self.requests_mock.side_effect = [mock_get, mock_update]
 
         existing_ref = {"source-id": backend_id}
@@ -670,9 +715,13 @@ class SimplyblockDriverTestCase(test.TestCase):
         # verify update call payload (last call)
         call_args, call_kwargs = self.requests_mock.call_args
         request_json = call_kwargs.get("json", {})
-        self.assertEqual(request_json.get("name"), f"cinder-vol-{self.volume.name_id}")
+        self.assertEqual(
+            request_json.get("name"), f"cinder-vol-{self.volume.name_id}"
+        )
         self.assertIn("attributes", request_json)
-        self.assertEqual(request_json["attributes"].get("uuid"), self.volume.id)
+        self.assertEqual(
+            request_json["attributes"].get("uuid"), self.volume.id
+        )
 
     def test_manage_existing_get_size_success(self):
         """Test manage_existing_get_size returns correct GB size."""
@@ -694,8 +743,9 @@ class SimplyblockDriverTestCase(test.TestCase):
         self.assertEqual(size, 12)
 
     def test_unmanage_success(self):
-        """ Test successful unmanage flow:
-            restore old name and clear imported attrs.
+        """Test successful unmanage flow.
+
+        Restore old name and clear imported attrs.
         """
         backend_id = fake.UUID3
 
@@ -743,16 +793,21 @@ class SimplyblockDriverTestCase(test.TestCase):
         # verify last request payload
         call_args, call_kwargs = self.requests_mock.call_args
         request_json = call_kwargs.get("json", {})
-        # We expect name reset to original and attributes to NOT include imported uuid
+        # We expect name reset to original
+        # and attributes to NOT include imported uuid
         self.assertEqual(request_json.get("name"), "orig-backend-name")
         self.assertNotIn("uuid", request_json.get("attributes", {}))
         self.assertNotIn("old_name", request_json.get("attributes", {}))
         # other attributes should survive
-        self.assertEqual(request_json.get("attributes", {}).get("some_other"), "keep-me")
+        self.assertEqual(
+            request_json.get("attributes", {}).get("some_other"), "keep-me"
+        )
 
     def test_unmanage_no_provider_id(self):
-        """ If volume has no provider_id,
-            unmanage should be a no-op (no HTTP calls).
+        """Test umanage without provider_id.
+
+        If volume has no provider_id,
+        unmanage should be a no-op (no HTTP calls).
         """
         # Clear provider_id
         self.volume.provider_id = None
