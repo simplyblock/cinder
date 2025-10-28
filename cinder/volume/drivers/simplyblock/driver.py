@@ -225,6 +225,51 @@ class SimplyblockDriver(driver.VolumeDriver):
         LOG.debug("qos_specs in simplyblock format: %s", qos)
         return qos
 
+    @staticmethod
+    def _get_extra_specs(volume_type):
+        """Get extra_specs of a volume_type.
+
+        This fetches the keys from the volume type. Anything set
+        from qos_specs will override keys set from extra_specs
+        """
+        if not volume_type:
+            return None
+
+        kvs = volume_type.get("extra_specs", {})
+
+        extras = {}
+        if 'simplyblock:fabric' in kvs:
+            try:
+                fabric = kvs['simplyblock:fabric'].upper()
+                assert fabric in ['TCP', 'RDMA']
+                extras['fabric'] = fabric
+            except Exception:
+                LOG.warning("Invalid fabric value: %s",
+                            kvs['simplyblock:fabric'])
+
+            del kvs['simplyblock:fabric']
+
+        if 'simplyblock:priority_class' in kvs:
+            try:
+                priority_class = int(kvs['simplyblock:priority_class'])
+                assert 0 <= priority_class <= 7
+                extras['lvol_priority_class'] = priority_class
+            except Exception:
+                LOG.warning("Invalid priority_class value: %s",
+                            kvs['simplyblock:priority_class'])
+
+            del kvs['simplyblock:priority_class']
+
+        for key, value in kvs.items():
+            if key.startswith('simplyblock:'):
+                extras[key.replace('simplyblock:', '')] = value
+
+        if extras == {}:
+            return None
+
+        LOG.debug("extra_specs in simplyblock format: %s", extras)
+        return extras
+
     def create_volume(self, volume):
         """Create a new volume."""
         LOG.info("Creating volume %s of size %d GB",
@@ -238,6 +283,13 @@ class SimplyblockDriver(driver.VolumeDriver):
             LOG.debug("Got QoS settings for volume %s: %s",
                       volume.name_id, qos)
             payload.update(qos)
+
+        extra_specs = self._get_extra_specs(volume.volume_type)
+        if extra_specs:
+            LOG.debug("Got extra specs for volume %s: %s",
+                      volume.name_id, extra_specs)
+            payload.update(extra_specs)
+
         lv = self.client.create_volume(**payload)
         # Save volume ID in provider_id so we can find it later
         volume.provider_id = lv.get("results")
@@ -414,7 +466,8 @@ class SimplyblockDriver(driver.VolumeDriver):
         """Not implemented: snapshots cannot be directly detached."""
         raise NotImplementedError()
 
-    def _build_nvme_data(self, export: Dict[str, Any]) -> Dict[str, Any]:
+    @staticmethod
+    def _build_nvme_data(export: Dict[str, Any]) -> Dict[str, Any]:
         """Build NVMe-oF connection data dictionary from Simplyblock export.
 
         Args:
@@ -505,6 +558,13 @@ class SimplyblockDriver(driver.VolumeDriver):
         pass
 
     def retype(self, context, volume, new_type, diff, host):
+        extra_specs = self._get_extra_specs(new_type)
+        if extra_specs:
+            LOG.warning("Got extra specs for volume type %s: %s."
+                        "Migration is required",
+                        new_type, extra_specs)
+            return False, {}
+
         # force apply qos from new volume type
         self._setup_volume(
             volume, new_type, raise_on_error=True, force_qos_update=True

@@ -31,7 +31,6 @@ from cinder.volume import configuration as conf
 from cinder.volume.drivers.simplyblock.client import SimplyblockAPIException
 from cinder.volume.drivers.simplyblock.driver import SimplyblockDriver
 
-
 LOG = logging.getLogger(__name__)
 
 
@@ -70,7 +69,7 @@ class SimplyblockDriverTestCase(test.TestCase):
             id=fake.VOLUME_ID,
             size=10,
             provider_id=fake.UUID1,
-            volume_type=volume_type,  # Initialize as None
+            volume_type=volume_type,
         )
 
         self.snapshot = mock.Mock()
@@ -109,6 +108,127 @@ class SimplyblockDriverTestCase(test.TestCase):
         mock_response.text = error_text
         mock_response.json.side_effect = ValueError("Not JSON")
         self.requests_mock.return_value = mock_response
+
+    def test_create_volume_with_extra_specs(self):
+        """Test volume creation with extra specs."""
+        mock_response = {"results": fake.UUID1}
+        self.mock_successful_response(mock_response)
+
+        self.volume.volume_type = fake_volume.fake_volume_type_obj(
+            self.ctxt,
+            extra_specs={
+                'simplyblock:fabric': 'TCP',
+                'simplyblock:priority_class': '2',
+                'simplyblock:custom_setting': 'custom_value'
+            },
+        )
+
+        result = self.driver.create_volume(self.volume)
+
+        # Verify API call was made with extra specs parameters
+        call_args, call_kwargs = self.requests_mock.call_args
+        request_json = call_kwargs["json"]
+
+        self.assertEqual(request_json['fabric'], 'TCP')
+        self.assertEqual(request_json['lvol_priority_class'], 2)
+        self.assertEqual(request_json['custom_setting'], 'custom_value')
+        self.assertEqual(result, {"provider_id": fake.UUID1})
+
+    def test_create_volume_with_qos_and_extra_specs(self):
+        """Test volume creation with both QoS and extra specs."""
+        mock_response = {"results": fake.UUID1}
+        self.mock_successful_response(mock_response)
+
+        self.volume.volume_type = fake_volume.fake_volume_type_obj(
+            self.ctxt,
+            extra_specs={
+                "total_iops_sec": "1000",
+                "simplyblock:fabric": "TCP",
+                "simplyblock:priority_class": "1",
+            },
+        )
+
+        result = self.driver.create_volume(self.volume)
+
+        call_args, call_kwargs = self.requests_mock.call_args
+        request_json = call_kwargs["json"]
+
+        # Check QoS parameters
+        self.assertEqual(request_json["max_rw_iops"], 1000)
+
+        # Check extra specs parameters
+        self.assertEqual(request_json['fabric'], 'TCP')
+        self.assertEqual(request_json['lvol_priority_class'], 1)
+
+        self.assertEqual(result, {"provider_id": fake.UUID1})
+
+    def test_create_volume_with_rdma_fabric(self):
+        """Test volume creation with RDMA fabric."""
+        mock_response = {"results": fake.UUID1}
+        self.mock_successful_response(mock_response)
+
+        self.volume.volume_type = fake_volume.fake_volume_type_obj(
+            self.ctxt,
+            extra_specs={
+                'simplyblock:fabric': 'RDMA',
+                'simplyblock:priority_class': '3'
+            },
+        )
+
+        result = self.driver.create_volume(self.volume)
+
+        call_args, call_kwargs = self.requests_mock.call_args
+        request_json = call_kwargs["json"]
+
+        self.assertEqual(request_json['fabric'], 'RDMA')
+        self.assertEqual(request_json['lvol_priority_class'], 3)
+        self.assertEqual(result, {"provider_id": fake.UUID1})
+
+    def test_create_volume_with_invalid_extra_specs(self):
+        """Test volume creation with invalid extra specs (must be ignored)."""
+        mock_response = {"results": fake.UUID1}
+        self.mock_successful_response(mock_response)
+
+        self.volume.volume_type = fake_volume.fake_volume_type_obj(
+            self.ctxt,
+            extra_specs={
+                'simplyblock:fabric': 'INVALID',  # Should be ignored
+                'simplyblock:priority_class': '10',  # Should be ignored
+                'simplyblock:valid_param': 'valid_value'
+            },
+        )
+
+        result = self.driver.create_volume(self.volume)
+
+        call_args, call_kwargs = self.requests_mock.call_args
+        request_json = call_kwargs["json"]
+
+        # Only valid parameters should be included
+        self.assertNotIn('fabric', request_json)
+        self.assertNotIn('lvol_priority_class', request_json)
+        self.assertEqual(request_json['valid_param'], 'valid_value')
+        self.assertEqual(result, {"provider_id": fake.UUID1})
+
+    def test_retype_volume_extra_specs(self):
+        """Test volume retype with new extra specs."""
+        new_type = fake_volume.fake_volume_type_obj(
+            self.ctxt,
+            extra_specs={
+                'simplyblock:fabric': 'RDMA',
+                'simplyblock:priority_class': '5'
+            },
+        )
+
+        # Mock successful update
+        self.mock_successful_response()
+
+        result, updates = self.driver.retype(
+            self.ctxt, self.volume, new_type, {}, None
+        )
+
+        # Verify retype was not successful
+        self.assertFalse(result)
+        self.assertEqual(updates, {})
 
     def test_setup_should_fail_if_simplyblock_client_cant_connect(self):
         """Verify driver setup fails when Simplyblock API is unavailable."""
@@ -218,7 +338,6 @@ class SimplyblockDriverTestCase(test.TestCase):
 
         # Verify request payload
         request_json = call_kwargs["json"]
-        # print("request_json", request_json)
         self.assertEqual(
             request_json["name"], f"cinder-vol-{self.volume.name_id}"
         )
@@ -596,7 +715,6 @@ class SimplyblockDriverTestCase(test.TestCase):
         # Verify QoS update was called
         call_args, call_kwargs = self.requests_mock.call_args
         request_json = call_kwargs["json"]
-        # print("request_json", request_json)
         self.assertEqual(request_json["max_rw_iops"], 4000)
         self.assertEqual(request_json["max_r_mbytes"], 100)
 
