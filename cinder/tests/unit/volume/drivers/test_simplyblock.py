@@ -117,7 +117,7 @@ class SimplyblockDriverTestCase(test.TestCase):
         self.volume.volume_type = fake_volume.fake_volume_type_obj(
             self.ctxt,
             extra_specs={
-                'simplyblock:fabric': 'TCP',
+                'simplyblock:fabric': 'tcp',
                 'simplyblock:priority_class': '2',
                 'simplyblock:custom_setting': 'custom_value'
             },
@@ -129,7 +129,7 @@ class SimplyblockDriverTestCase(test.TestCase):
         call_args, call_kwargs = self.requests_mock.call_args
         request_json = call_kwargs["json"]
 
-        self.assertEqual(request_json['fabric'], 'TCP')
+        self.assertEqual(request_json['fabric'], 'tcp')
         self.assertEqual(request_json['lvol_priority_class'], 2)
         self.assertEqual(request_json['custom_setting'], 'custom_value')
         self.assertEqual(result, {"provider_id": fake.UUID1})
@@ -157,7 +157,7 @@ class SimplyblockDriverTestCase(test.TestCase):
         self.assertEqual(request_json["max_rw_iops"], 1000)
 
         # Check extra specs parameters
-        self.assertEqual(request_json['fabric'], 'TCP')
+        self.assertEqual(request_json['fabric'], 'tcp')
         self.assertEqual(request_json['lvol_priority_class'], 1)
 
         self.assertEqual(result, {"provider_id": fake.UUID1})
@@ -180,7 +180,7 @@ class SimplyblockDriverTestCase(test.TestCase):
         call_args, call_kwargs = self.requests_mock.call_args
         request_json = call_kwargs["json"]
 
-        self.assertEqual(request_json['fabric'], 'RDMA')
+        self.assertEqual(request_json['fabric'], 'rdma')
         self.assertEqual(request_json['lvol_priority_class'], 3)
         self.assertEqual(result, {"provider_id": fake.UUID1})
 
@@ -209,25 +209,90 @@ class SimplyblockDriverTestCase(test.TestCase):
         self.assertEqual(request_json['valid_param'], 'valid_value')
         self.assertEqual(result, {"provider_id": fake.UUID1})
 
-    def test_retype_volume_extra_specs(self):
-        """Test volume retype with new extra specs."""
+    def test_retype_volume_extra_specs_different(self):
+        """Test volume retype with different extra specs - should return False."""
+        # Set up original volume type with some extra specs
+        self.volume.volume_type = fake_volume.fake_volume_type_obj(
+            self.ctxt,
+            extra_specs={
+                'simplyblock:fabric': 'tcp',
+                'simplyblock:priority_class': '2'
+            },
+        )
+
         new_type = fake_volume.fake_volume_type_obj(
             self.ctxt,
             extra_specs={
-                'simplyblock:fabric': 'RDMA',
+                'simplyblock:fabric': 'RDMA',  # Different fabric
                 'simplyblock:priority_class': '5'
             },
         )
 
-        # Mock successful update
+        result, updates = self.driver.retype(
+            self.ctxt, self.volume, new_type, {}, None
+        )
+
+        # Verify retype was not successful due to different extra specs
+        self.assertFalse(result)
+        self.assertEqual(updates, {})
+
+    def test_retype_volume_extra_specs_same(self):
+        """Test volume retype with identical extra specs - should return True."""
+        # Set up original volume type with some extra specs
+        self.volume.volume_type = fake_volume.fake_volume_type_obj(
+            self.ctxt,
+            extra_specs={
+                'simplyblock:fabric': 'tcp',
+                'simplyblock:priority_class': '2',
+                'simplyblock:custom_setting': 'same_value'
+            },
+        )
+
+        new_type = fake_volume.fake_volume_type_obj(
+            self.ctxt,
+            extra_specs={
+                'simplyblock:fabric': 'tcp',  # Same fabric
+                'simplyblock:priority_class': '2',  # Same priority
+                'simplyblock:custom_setting': 'same_value'  # Same custom setting
+            },
+        )
+
+        # Mock successful QoS update
         self.mock_successful_response()
 
         result, updates = self.driver.retype(
             self.ctxt, self.volume, new_type, {}, None
         )
 
-        # Verify retype was not successful
-        self.assertFalse(result)
+        # Verify retype was successful since extra specs are identical
+        self.assertTrue(result)
+        self.assertEqual(updates, {})
+
+        # Verify that QoS update was called (since force_qos_update=True in retype)
+        self.requests_mock.assert_called_once()
+
+    def test_retype_volume_extra_specs_none(self):
+        """Test volume retype when both old and new have no extra specs - should return True."""
+        # Set up original volume type with no extra specs
+        self.volume.volume_type = fake_volume.fake_volume_type_obj(
+            self.ctxt,
+            extra_specs={},  # No extra specs
+        )
+
+        new_type = fake_volume.fake_volume_type_obj(
+            self.ctxt,
+            extra_specs={},  # Also no extra specs
+        )
+
+        # Mock successful QoS update
+        self.mock_successful_response()
+
+        result, updates = self.driver.retype(
+            self.ctxt, self.volume, new_type, {}, None
+        )
+
+        # Verify retype was successful since both have no extra specs (both None)
+        self.assertTrue(result)
         self.assertEqual(updates, {})
 
     def test_setup_should_fail_if_simplyblock_client_cant_connect(self):
@@ -303,7 +368,7 @@ class SimplyblockDriverTestCase(test.TestCase):
 
         self.assertEqual(stats["volume_backend_name"], "simplyblock")
         self.assertEqual(stats["vendor_name"], "Simplyblock")
-        self.assertEqual(stats["storage_protocol"], "NVMe-TCP")
+        self.assertEqual(stats["storage_protocol"], "NVMe-oF")
         self.assertEqual(stats["total_capacity_gb"], 100)
         self.assertEqual(stats["free_capacity_gb"], 50)
         self.assertEqual(stats["provisioned_capacity_gb"], 50)
@@ -444,7 +509,8 @@ class SimplyblockDriverTestCase(test.TestCase):
                 {
                     "ip": "192.168.1.10",
                     "port": 4420,
-                    "nqn": "nqn.2024-05.simplyblock:vol-123",
+                    "nqn": "nqn.2024-05.simplyblock:clus-id:lvol:vol-123",
+                    "transport": "tcp",
                 }
             ]
         }
@@ -455,10 +521,9 @@ class SimplyblockDriverTestCase(test.TestCase):
         )
 
         expected_data = {
-            "target_nqn": "nqn.2024-05.simplyblock:vol-123",
+            "target_nqn": "nqn.2024-05.simplyblock:clus-id:lvol:vol-123",
             "portals": [("192.168.1.10", 4420, "tcp")],
             "host_nqn": self.connector["nqn"],
-            "transport_type": "tcp",
             "volume_id": self.volume.id,
             "access_mode": "rw",
             "discard": False,
@@ -742,52 +807,6 @@ class SimplyblockDriverTestCase(test.TestCase):
                 {},
                 None,
             )
-
-    def test_build_nvme_data_basic(self):
-        """Test NVMe data building with basic export data."""
-        export_data = {
-            "target_nqn": "nqn.test",
-            "portal_ip": "192.168.1.10",
-            "portal_port": 4420,
-        }
-
-        expected_result = {
-            "target_nqn": "nqn.test",
-            "target_portal": "192.168.1.10:4420",
-            "transport_type": "tcp",
-        }
-
-        result = self.driver._build_nvme_data(export_data)
-        self.assertDictEqual(result, expected_result)
-
-    def test_build_nvme_data_with_host_nqn(self):
-        """Test NVMe data building with host NQN."""
-        export_data = {
-            "target_nqn": "nqn.test",
-            "portal_ip": "192.168.1.10",
-            "portal_port": 4420,
-            "host_nqn": "nqn.host",
-        }
-
-        expected_result = {
-            "target_nqn": "nqn.test",
-            "target_portal": "192.168.1.10:4420",
-            "transport_type": "tcp",
-            "host_nqn": "nqn.host",
-        }
-
-        result = self.driver._build_nvme_data(export_data)
-        self.assertDictEqual(result, expected_result)
-
-    def test_build_nvme_data_missing_fields(self):
-        """Test NVMe data building failure with missing required fields."""
-        export_data = {"target_nqn": "nqn.test"}
-
-        self.assertRaises(
-            exception.VolumeDriverException,
-            self.driver._build_nvme_data,
-            export_data
-        )
 
     def test_manage_existing_success(self):
         """Test successful manage_existing flow."""

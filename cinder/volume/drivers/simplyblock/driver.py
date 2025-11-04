@@ -12,8 +12,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 #
-# OpenStack Cinder Volume Driver for Simplyblock (NVMe/TCP)
-from typing import Any, Dict
+# OpenStack Cinder Volume Driver for Simplyblock (NVMe/TCP and NVMe/RDMA)
 import math
 
 from oslo_config import cfg
@@ -55,7 +54,9 @@ class SimplyblockRetryableException(exception.VolumeBackendAPIException):
 
 @interface.volumedriver
 class SimplyblockDriver(driver.VolumeDriver):
-    """OpenStack cinder driver to enable Simplyblock cluster via NVMe/TCP.
+    """OpenStack cinder driver to enable Simplyblock cluster
+
+    via NVMe/TCP and NVMe/RDMA.
 
     .. code-block:: default
 
@@ -82,8 +83,7 @@ class SimplyblockDriver(driver.VolumeDriver):
     def __init__(self, *args, **kwargs):
         super(SimplyblockDriver, self).__init__(*args, **kwargs)
 
-        self.transport_type = "tcp"
-        self._storage_protocol = constants.NVMEOF_TCP
+        self._storage_protocol = constants.NVMEOF
         self.configuration.append_config_values(simplyblock_opts)
         api_token = (f"{self.configuration.simplyblock_cluster_uuid} "
                      f"{self.configuration.simplyblock_cluster_secret}")
@@ -240,8 +240,8 @@ class SimplyblockDriver(driver.VolumeDriver):
         extras = {}
         if 'simplyblock:fabric' in kvs:
             try:
-                fabric = kvs['simplyblock:fabric'].upper()
-                assert fabric in ['TCP', 'RDMA']
+                fabric = kvs['simplyblock:fabric'].lower()
+                assert fabric in ['tcp', 'rdma']
                 extras['fabric'] = fabric
             except Exception:
                 LOG.warning("Invalid fabric value: %s",
@@ -401,20 +401,19 @@ class SimplyblockDriver(driver.VolumeDriver):
 
         response = self.client.get_volume_connection_strings(vol_id)
         portals = [
-            (p["ip"], p["port"], self.transport_type)
+            (p["ip"], p["port"], p["transport"])
             for p in response["results"]
         ]
 
         # multiple portals on the same controller
         # are not supported in os-bricks 2025.1
         # provide only primary connection to avoid errors
-        portals = portals[:1]
+        # portals = portals[:1]
         target_nqn = response["results"][-1]["nqn"]
         props = {
             "target_nqn": target_nqn,
             "portals": portals,
             "host_nqn": hostnqn,
-            "transport_type": "tcp",
             "volume_id": volume["id"],
             "access_mode": "rw",
             "discard": False,
@@ -423,6 +422,15 @@ class SimplyblockDriver(driver.VolumeDriver):
         return {"driver_volume_type": "nvmeof", "data": props}
 
     def terminate_connection(self, volume, connector, **kwargs):
+        """Remove access to a volume.
+
+        Since we don't create any resources in initialize_connection,
+        there's nothing to clean up here.
+        Simplyblock manages connections automatically.
+        """
+        LOG.info("Terminate connection for volume %s (connector: %s). "
+                 "No action required for Simplyblock driver.",
+                 volume.id, connector)
         pass
 
     def ensure_export(self, context, volume):
@@ -466,56 +474,6 @@ class SimplyblockDriver(driver.VolumeDriver):
         """Not implemented: snapshots cannot be directly detached."""
         raise NotImplementedError()
 
-    @staticmethod
-    def _build_nvme_data(export: Dict[str, Any]) -> Dict[str, Any]:
-        """Build NVMe-oF connection data dictionary from Simplyblock export.
-
-        Args:
-            export:
-                Dictionary containing NVMe export details from Simplyblock API.
-                Expected keys: target_nqn, portal_ip, portal_port
-                Optional keys: transport_type, host_nqn
-
-        Returns:
-            Dictionary with NVMe connection parameters in Cinder format.
-
-        Raises:
-            VolumeDriverException:
-                If required fields are missing in export data.
-        """
-        required_fields = ["target_nqn", "portal_ip", "portal_port"]
-        missing_fields = [field for field in required_fields
-                          if field not in export]
-
-        if missing_fields:
-            raise exception.VolumeDriverException(
-                f"Missing required fields in export data: {missing_fields}"
-            )
-
-        # Default to TCP if transport type not specified
-        transport_type = export.get("transport_type", "tcp")
-
-        # Validate transport type
-        if transport_type.lower() not in ("tcp", "rdma"):
-            LOG.warning(
-                "Unsupported transport type: %s. Defaulting to 'tcp'",
-                transport_type
-            )
-            transport_type = "tcp"
-
-        nvme_data = {
-            "target_nqn": export["target_nqn"],
-            "target_portal": f"{export['portal_ip']}:{export['portal_port']}",
-            "transport_type": transport_type,
-        }
-
-        # Add host NQN if provided (for initiator configuration)
-        if "host_nqn" in export:
-            nvme_data["host_nqn"] = export["host_nqn"]
-
-        LOG.debug("Generated NVMe connection data: %s", nvme_data)
-        return nvme_data
-
     def create_cloned_volume(self, volume, src_vref):
         """Create a clone of the specified volume."""
         LOG.info(
@@ -558,11 +516,13 @@ class SimplyblockDriver(driver.VolumeDriver):
         pass
 
     def retype(self, context, volume, new_type, diff, host):
-        extra_specs = self._get_extra_specs(new_type)
-        if extra_specs:
-            LOG.warning("Got extra specs for volume type %s: %s."
-                        "Migration is required",
-                        new_type, extra_specs)
+        extra_specs_old = self._get_extra_specs(volume.volume_type)
+        extra_specs_new = self._get_extra_specs(new_type)
+        if extra_specs_old != extra_specs_new:
+            LOG.info(
+                "Retype not possible: extra_specs differ. Old: %s, New: %s",
+                extra_specs_old, extra_specs_new
+            )
             return False, {}
 
         # force apply qos from new volume type
