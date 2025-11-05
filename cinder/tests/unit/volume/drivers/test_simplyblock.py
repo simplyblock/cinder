@@ -210,7 +210,10 @@ class SimplyblockDriverTestCase(test.TestCase):
         self.assertEqual(result, {"provider_id": fake.UUID1})
 
     def test_retype_volume_extra_specs_different(self):
-        """Test volume retype with different extra specs - should return False."""
+        """Test volume retype with different extra specs
+
+        - should return False.
+        """
         # Set up original volume type with some extra specs
         self.volume.volume_type = fake_volume.fake_volume_type_obj(
             self.ctxt,
@@ -237,7 +240,10 @@ class SimplyblockDriverTestCase(test.TestCase):
         self.assertEqual(updates, {})
 
     def test_retype_volume_extra_specs_same(self):
-        """Test volume retype with identical extra specs - should return True."""
+        """Test volume retype with identical extra specs
+
+        - should return True.
+        """
         # Set up original volume type with some extra specs
         self.volume.volume_type = fake_volume.fake_volume_type_obj(
             self.ctxt,
@@ -253,7 +259,7 @@ class SimplyblockDriverTestCase(test.TestCase):
             extra_specs={
                 'simplyblock:fabric': 'tcp',  # Same fabric
                 'simplyblock:priority_class': '2',  # Same priority
-                'simplyblock:custom_setting': 'same_value'  # Same custom setting
+                'simplyblock:custom_setting': 'same_value'  # Same setting
             },
         )
 
@@ -268,11 +274,15 @@ class SimplyblockDriverTestCase(test.TestCase):
         self.assertTrue(result)
         self.assertEqual(updates, {})
 
-        # Verify that QoS update was called (since force_qos_update=True in retype)
+        # Verify that QoS update was called
+        # (since force_qos_update=True in retype)
         self.requests_mock.assert_called_once()
 
     def test_retype_volume_extra_specs_none(self):
-        """Test volume retype when both old and new have no extra specs - should return True."""
+        """Test volume retype when both old and new have no extra specs
+
+        - should return True.
+        """
         # Set up original volume type with no extra specs
         self.volume.volume_type = fake_volume.fake_volume_type_obj(
             self.ctxt,
@@ -291,7 +301,8 @@ class SimplyblockDriverTestCase(test.TestCase):
             self.ctxt, self.volume, new_type, {}, None
         )
 
-        # Verify retype was successful since both have no extra specs (both None)
+        # Verify retype was successful since both have no extra specs
+        # (both None)
         self.assertTrue(result)
         self.assertEqual(updates, {})
 
@@ -352,9 +363,9 @@ class SimplyblockDriverTestCase(test.TestCase):
             "results": {
                 "stats": [
                     {
-                        "size_total": 100 * units.G,
-                        "size_prov": 50 * units.G,
-                        "size_free": 50 * units.G,
+                        "size_total": 100 * units.Gi,
+                        "size_prov": 50 * units.Gi,
+                        "size_free": 50 * units.Gi,
                         "read_io_ps": 1000,
                         "write_io_ps": 2000,
                         "unmap_io_ps": 50,
@@ -406,7 +417,7 @@ class SimplyblockDriverTestCase(test.TestCase):
         self.assertEqual(
             request_json["name"], f"cinder-vol-{self.volume.name_id}"
         )
-        self.assertEqual(request_json["size"], f"{self.volume.size}G")
+        self.assertEqual(request_json["size"], f"{self.volume.size}GiB")
         # Verify QoS parameters are absent
         self.assertNotIn("max_rw_iops", request_json)
         self.assertNotIn("max_r_mbytes", request_json)

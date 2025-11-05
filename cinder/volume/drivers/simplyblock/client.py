@@ -115,11 +115,11 @@ class SimplyblockClient:
 
         return lvol
 
-    def create_volume(self, name: str, size_gb: int, **kwargs) \
+    def create_volume(self, name: str, size_gib: int, **kwargs) \
             -> Dict[str, Any]:
         data = {
             "name": name,
-            "size": f"{size_gb}G",
+            "size": f"{size_gib}GiB",
             "pool": self.pool_name,
         }
         data.update(kwargs)
@@ -132,9 +132,9 @@ class SimplyblockClient:
     def delete_volume(self, volume_id: str) -> None:
         self._request("DELETE", f"/lvol/{volume_id}")
 
-    def extend_volume(self, volume_id: str, new_size_gb: str) \
+    def extend_volume(self, volume_id: str, new_size_gib: str) \
             -> Dict[str, Any]:
-        data = {"size": new_size_gb}
+        data = {"size": new_size_gib}
         return self._request("PUT", f"/lvol/resize/{volume_id}", json=data)
 
     def get_cluster_stats(self, cluster_id: str):
@@ -178,7 +178,7 @@ class SimplyblockClient:
         self._request("DELETE", f"/snapshot/{snapshot_id}")
 
     def clone_volume_from_snapshot(
-        self, src_snapshot_id: str, name: str, new_size_gb: int = None
+        self, src_snapshot_id: str, name: str, new_size_gib: int = None
     ) -> Dict[str, Any]:
         """Create new volume from snapshot.
 
@@ -190,8 +190,8 @@ class SimplyblockClient:
             Dictionary with new volume details
         """
         data = {"snapshot_id": src_snapshot_id, "clone_name": name}
-        if new_size_gb:
-            data["new_size"] = f"{new_size_gb}G"
+        if new_size_gib:
+            data["new_size"] = f"{new_size_gib}G"
         return self._request("POST", "/snapshot/clone", json=data)
 
     def list_snapshots(self) -> List[Dict[str, Any]]:

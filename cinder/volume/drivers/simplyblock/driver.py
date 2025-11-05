@@ -167,10 +167,10 @@ class SimplyblockDriver(driver.VolumeDriver):
             return
 
         results = results["results"]["stats"][0]
-        data["total_capacity_gb"] = results["size_total"] / units.G
+        data["total_capacity_gb"] = results["size_total"] / units.Gi
         data["thin_provisioning_support"] = False
-        data["provisioned_capacity_gb"] = results["size_prov"] / units.G
-        data["free_capacity_gb"] = results["size_free"] / units.G
+        data["provisioned_capacity_gb"] = results["size_prov"] / units.Gi
+        data["free_capacity_gb"] = results["size_free"] / units.Gi
 
         data["current_iops"] = (
             results["read_io_ps"] + results["write_io_ps"]
@@ -272,11 +272,11 @@ class SimplyblockDriver(driver.VolumeDriver):
 
     def create_volume(self, volume):
         """Create a new volume."""
-        LOG.info("Creating volume %s of size %d GB",
+        LOG.info("Creating volume %s of size %d GiB",
                  volume.name_id, volume.size)
         payload = {
             "name": f"cinder-vol-{volume.name_id}",
-            "size_gb": volume.size,
+            "size_gib": volume.size,
         }
         qos = self._get_qos_settings(volume.volume_type)
         if qos:
@@ -340,11 +340,11 @@ class SimplyblockDriver(driver.VolumeDriver):
         LOG.info("Creating volume %s from snapshot %s",
                  volume.name_id, snapshot.id)
 
-        new_size_gb = volume.size
+        new_size_gib = volume.size
         res = self.client.clone_volume_from_snapshot(
             src_snapshot_id=snapshot.provider_id,
             name=f"cinder-vol-{volume.name_id}",
-            new_size_gb=new_size_gb,
+            new_size_gib=new_size_gib,
         )
         volume.provider_id = res.get("results")
 
@@ -373,13 +373,13 @@ class SimplyblockDriver(driver.VolumeDriver):
             LOG.error("Failed to delete volume %s: %s", vol_id, e)
 
     def extend_volume(self, volume, new_size):
-        """Extend a volume to new_size in GB."""
+        """Extend a volume to new_size in GiB."""
         vol_id = volume.provider_id
         if not vol_id:
             raise SimplyblockDriverException(
                 "Missing provider_id for volume extend"
             )
-        LOG.info("Extending volume %s to size %d GB", vol_id, new_size)
+        LOG.info("Extending volume %s to size %d GiB", vol_id, new_size)
         new_size_str = f"{new_size}G"
         self.client.extend_volume(vol_id, new_size_str)
 
@@ -615,9 +615,9 @@ class SimplyblockDriver(driver.VolumeDriver):
         return {"provider_id": sbid}
 
     def manage_existing_get_size(self, volume, existing_ref):
-        """Return size (in GB) of an existing backend volume.
+        """Return size (in GiB) of an existing backend volume.
 
-        Queries backend and returns an integer size in GB to let Cinder
+        Queries backend and returns an integer size in GiB to let Cinder
         ensure requested size matches the real object.
         """
         LOG.info("Getting size of existing volume %s", existing_ref)
@@ -640,15 +640,15 @@ class SimplyblockDriver(driver.VolumeDriver):
 
         # Try a few common fields returned by different APIs
         try:
-            size_gb = int(math.ceil(int(sb_vol["size"]) / units.G))
+            size_gib = int(math.ceil(int(sb_vol["size"]) / units.Gi))
         except Exception:
             msg = _("Could not find Simplyblock volume %s")
             LOG.error("%s. Volume info: %s", msg, sb_vol)
             raise SimplyblockDriverException(msg)
 
-        LOG.debug("manage_existing_get_size: backend %s size %d GB",
-                  sbid, size_gb)
-        return int(size_gb)
+        LOG.debug("manage_existing_get_size: backend %s size %d GiB",
+                  sbid, size_gib)
+        return int(size_gib)
 
     def unmanage(self, volume):
         """Unmanage a Simplyblock volume previously imported into Cinder.
