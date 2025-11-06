@@ -24,6 +24,7 @@ from cinder import context
 from cinder import exception
 from cinder.i18n import _
 from cinder import interface
+from cinder.objects import fields
 from cinder.volume import configuration
 from cinder.volume import driver
 from cinder.volume.drivers.simplyblock.client import SimplyblockAPIException
@@ -720,3 +721,57 @@ class SimplyblockDriver(driver.VolumeDriver):
             "Successfully unmanaged Simplyblock volume %s (provider_id=%s)",
             volume.name_id, vol_id
         )
+
+    def migrate_volume(self, ctxt, volume, host):
+        """Migrate volume between hosts using the same Simplyblock cluster.
+
+        If the target host uses the same Simplyblock cluster UUID and pool ,
+        we reuse the existing provider_id (no backend copy required).
+        Otherwise, migration is not handled here.
+        """
+        LOG.info("Migrate volume %(vol_id)s to %(host)s.",
+                 {"vol_id": volume.id, "host": host["host"]})
+
+        if (volume.status != fields.VolumeStatus.AVAILABLE and
+                volume.status != fields.VolumeStatus.RETYPING):
+            msg = _("Volume status must be 'available' or 'retyping' to "
+                    "execute storage assisted migration.")
+            LOG.error(msg)
+            raise exception.InvalidVolume(reason=msg)
+
+        capabilities = host.get("capabilities", {}) or {}
+        LOG.debug("New host capabilities %s", capabilities)
+        dest_cluster_uuid = capabilities.get("simplyblock_cluster_uuid")
+        dest_pool_name = capabilities.get("simplyblock_pool_name")
+
+        src_cluster_uuid = self.configuration.simplyblock_cluster_uuid
+        src_pool_name = self.configuration.simplyblock_pool_name
+
+        same_cluster = (
+            dest_cluster_uuid
+            and dest_cluster_uuid == src_cluster_uuid
+            and dest_pool_name
+            and dest_pool_name == src_pool_name
+        )
+
+        if same_cluster:
+            LOG.info(
+                "Migration within the same Simplyblock cluster (%s) and pool "
+                "(%s). Reusing provider_id=%s.",
+                dest_cluster_uuid,
+                dest_pool_name,
+                volume.provider_id,
+            )
+            return True, {"provider_id": volume.provider_id}
+
+        LOG.warning(
+            "Migration target host %s uses a different Simplyblock cluster "
+            "or pool (cluster: %s != %s, pool: %s != %s). "
+            "Storage assisted migration not supported.",
+            host.get("host"),
+            dest_cluster_uuid,
+            src_cluster_uuid,
+            dest_pool_name,
+            src_pool_name,
+        )
+        return False, None

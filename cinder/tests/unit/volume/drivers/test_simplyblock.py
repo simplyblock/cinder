@@ -965,6 +965,68 @@ class SimplyblockDriverTestCase(test.TestCase):
         # requests.Session.request should not have been called
         self.requests_mock.assert_not_called()
 
+    def test_migrate_volume_same_cluster_and_pool(self):
+        """Test migrate_volume when target host uses same cluster and pool."""
+        host = {
+            "host": "new-host",
+            "capabilities": {
+                "simplyblock_cluster_uuid":
+                    self.configuration.simplyblock_cluster_uuid,
+                "simplyblock_pool_name":
+                    self.configuration.simplyblock_pool_name,
+            },
+        }
+
+        success, updates = self.driver.migrate_volume(
+            self.ctxt, self.volume, host)
+
+        self.assertTrue(success)
+        self.assertEqual(updates, {"provider_id": self.volume.provider_id})
+
+    def test_migrate_volume_different_cluster(self):
+        """Test migrate_volume when target host uses different cluster."""
+        host = {
+            "host": "new-host",
+            "capabilities": {
+                "simplyblock_cluster_uuid": "different-cluster",
+                "simplyblock_pool_name":
+                    self.configuration.simplyblock_pool_name,
+            },
+        }
+
+        success, updates = self.driver.migrate_volume(
+            self.ctxt, self.volume, host)
+        self.assertFalse(success)
+        self.assertIsNone(updates)
+
+    def test_migrate_volume_different_pool(self):
+        """Test migrate_volume when target host uses same cluster
+
+        but different pool.
+        """
+        host = {
+            "host": "new-host",
+            "capabilities": {
+                "simplyblock_cluster_uuid":
+                    self.configuration.simplyblock_cluster_uuid,
+                "simplyblock_pool_name": "other-pool",
+            },
+        }
+
+        success, updates = self.driver.migrate_volume(
+            self.ctxt, self.volume, host)
+        self.assertFalse(success)
+        self.assertIsNone(updates)
+
+    def test_migrate_volume_missing_capabilities(self):
+        """Test migrate_volume when host has no capabilities."""
+        host = {"host": "new-host"}  # no 'capabilities' field
+
+        success, updates = self.driver.migrate_volume(
+            self.ctxt, self.volume, host)
+        self.assertFalse(success)
+        self.assertIsNone(updates)
+
 
 if __name__ == "__main__":
     unittest.main()

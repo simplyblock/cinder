@@ -191,7 +191,7 @@ class SimplyblockClient:
         """
         data = {"snapshot_id": src_snapshot_id, "clone_name": name}
         if new_size_gib:
-            data["new_size"] = f"{new_size_gib}G"
+            data["new_size"] = f"{new_size_gib}GiB"
         return self._request("POST", "/snapshot/clone", json=data)
 
     def list_snapshots(self) -> List[Dict[str, Any]]:
