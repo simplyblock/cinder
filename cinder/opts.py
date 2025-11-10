@@ -177,6 +177,8 @@ from cinder.volume.drivers.san.hp import hpmsa_common as \
 from cinder.volume.drivers.san import san as cinder_volume_drivers_san_san
 from cinder.volume.drivers.sandstone import sds_driver as \
     cinder_volume_drivers_sandstone_sdsdriver
+from cinder.volume.drivers.simplyblock import driver as \
+    cinder_volume_drivers_simplyblock_driver
 from cinder.volume.drivers import solidfire as cinder_volume_drivers_solidfire
 from cinder.volume.drivers import storpool as cinder_volume_drivers_storpool
 from cinder.volume.drivers.stx import common as \
@@ -438,6 +440,7 @@ def list_opts():
                 cinder_volume_drivers_san_hp_hpmsacommon.common_opts,
                 cinder_volume_drivers_san_hp_hpmsacommon.iscsi_opts,
                 cinder_volume_drivers_san_san.san_opts,
+                cinder_volume_drivers_simplyblock_driver.simplyblock_opts,
                 cinder_volume_drivers_solidfire.sf_opts,
                 cinder_volume_drivers_storpool.storpool_opts,
                 cinder_volume_drivers_stx_common.common_opts,
