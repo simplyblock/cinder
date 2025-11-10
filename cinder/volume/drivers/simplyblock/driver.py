@@ -341,7 +341,11 @@ class SimplyblockDriver(driver.VolumeDriver):
         LOG.info("Creating volume %s from snapshot %s",
                  volume.name_id, snapshot.id)
 
-        new_size_gib = volume.size
+        # Simplyblock API does only allows to specify new_size
+        # higher than the original one.
+        # If the size should the same, do not specify it
+        new_size_gib = volume.size if volume.size > snapshot.volume.size \
+            else None
         res = self.client.clone_volume_from_snapshot(
             src_snapshot_id=snapshot.provider_id,
             name=f"cinder-vol-{volume.name_id}",
